@@ -1,5 +1,9 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
+
+from smart_home.models import Home_electricity_consumption
+
+
 class CreateUserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
@@ -14,3 +18,10 @@ class CreateUserSerializer(serializers.ModelSerializer):
         user.set_password(validated_data['password'])
         user.save()
         return user
+
+class HomeElectricityConsumptionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Home_electricity_consumption
+        fields = ['global_active_power', 'global_reactive_power', 'voltage',
+                  'global_intensity', 'sub_metering_1', 'sub_metering_2', 'sub_metering_3']
+
