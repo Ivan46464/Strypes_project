@@ -128,11 +128,11 @@ class PredictGlobalActivePowerDaily(APIView):
         model = tf.keras.models.load_model('smart_home/Models/Global_active_power/my_model.keras', custom_objects=custom_objects)
         ct = joblib.load('smart_home/Models/Global_active_power/column_transformer.pkl')
 
-        # Prepare the input data for prediction
+
         input_data = pd.DataFrame([[global_intensity, voltage]], columns=['Global_intensity', 'Voltage'])
         input_standardized = ct.transform(input_data)
 
-        # Predict the global active power for the next day
+
         prediction = model.predict(input_standardized)
 
         result = {
@@ -149,32 +149,31 @@ class PredictGlobalActivePowerWeekly(APIView):
     def get(self, request):
         user = request.user
 
-        # Define current week range (assuming week starts on Monday)
+
         current_date = datetime.now().date()
         start_of_week = current_date - timedelta(days=current_date.weekday())
         end_of_week = start_of_week + timedelta(days=6)
 
-        # Convert to aware datetime objects
+
         start_of_week = make_aware(datetime.combine(start_of_week, datetime.min.time()))
         end_of_week = make_aware(datetime.combine(end_of_week, datetime.max.time()))
 
-        # Fetch data for the current week
         queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_week, end_of_week))
         data = pd.DataFrame.from_records(queryset.values())
 
         if data.empty:
             return Response({"error": "No data available for the user during the current week"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Aggregate the data by day (mean, sum, etc.)
+
         data['date'] = pd.to_datetime(data['date']).dt.date
         daily_aggregated_data = data.groupby('date').mean()
 
-        # Prepare weekly averaged input data
+
         weekly_averages = daily_aggregated_data.mean()
         global_intensity = weekly_averages['global_intensity']
         voltage = weekly_averages['voltage']
 
-        # Load the model and column transformer
+
         custom_objects = {
             'mse': tf.keras.losses.MeanSquaredError(),
             'mae': tf.keras.metrics.MeanAbsoluteError(),
@@ -183,11 +182,11 @@ class PredictGlobalActivePowerWeekly(APIView):
         model = tf.keras.models.load_model('smart_home/Models/Global_active_power/my_model.keras', custom_objects=custom_objects)
         ct = joblib.load('smart_home/Models/Global_active_power/column_transformer.pkl')
 
-        # Prepare the input data for prediction
+
         input_data = pd.DataFrame([[global_intensity, voltage]], columns=['Global_intensity', 'Voltage'])
         input_standardized = ct.transform(input_data)
 
-        # Predict the global active power for the next week
+
         prediction = model.predict(input_standardized)
 
         result = {
@@ -203,33 +202,33 @@ class PredictGlobalActivePowerMonthly(APIView):
     def get(self, request):
         user = request.user
 
-        # Define current month range
+
         current_date = datetime.now().date()
         start_of_month = current_date.replace(day=1)
         next_month = (start_of_month.replace(day=28) + timedelta(days=4)).replace(day=1)
         end_of_month = next_month - timedelta(days=1)
 
-        # Convert to aware datetime objects
+
         start_of_month = make_aware(datetime.combine(start_of_month, datetime.min.time()))
         end_of_month = make_aware(datetime.combine(end_of_month, datetime.max.time()))
 
-        # Fetch data for the current month
+
         queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_month, end_of_month))
         data = pd.DataFrame.from_records(queryset.values())
 
         if data.empty:
             return Response({"error": "No data available for the user during the current month"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Aggregate the data by day (mean, sum, etc.)
+
         data['date'] = pd.to_datetime(data['date']).dt.date
         daily_aggregated_data = data.groupby('date').mean()
 
-        # Prepare monthly averaged input data
+
         monthly_averages = daily_aggregated_data.mean()
         global_intensity = monthly_averages['global_intensity']
         voltage = monthly_averages['voltage']
 
-        # Load the model and column transformer
+
         custom_objects = {
             'mse': tf.keras.losses.MeanSquaredError(),
             'mae': tf.keras.metrics.MeanAbsoluteError(),
@@ -238,11 +237,9 @@ class PredictGlobalActivePowerMonthly(APIView):
         model = tf.keras.models.load_model('smart_home/Models/Global_active_power/my_model.keras', custom_objects=custom_objects)
         ct = joblib.load('smart_home/Models/Global_active_power/column_transformer.pkl')
 
-        # Prepare the input data for prediction
         input_data = pd.DataFrame([[global_intensity, voltage]], columns=['Global_intensity', 'Voltage'])
         input_standardized = ct.transform(input_data)
 
-        # Predict the global active power for the next month
         prediction = model.predict(input_standardized)
 
         result = {
@@ -258,12 +255,11 @@ class PredictSubMetering1Daily(APIView):
     def get(self, request):
         user = request.user
 
-        # Define current day range
+
         current_date = datetime.now().date()
         start_of_day = make_aware(datetime.combine(current_date, datetime.min.time()))
         end_of_day = make_aware(datetime.combine(current_date, datetime.max.time()))
 
-        # Fetch data for the current day
         queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_day, end_of_day))
         data = pd.DataFrame.from_records(queryset.values())
 
@@ -278,16 +274,15 @@ class PredictSubMetering1Daily(APIView):
         sub_metering_2 = aggregated_data['sub_metering_2']
         sub_metering_3 = aggregated_data['sub_metering_3']
 
-        # Load the KNN model and the scaler
+
         loaded_model = joblib.load('smart_home/Models/Sub_metering_1/best_knn_model_sub_1.pkl')
         scaler = joblib.load('smart_home/Models/Sub_metering_1/scaler_sub_1.pkl')
 
-        # Prepare the input data for prediction
+
         input_data = pd.DataFrame([[global_active_power, global_intensity, sub_metering_2, sub_metering_3]],
                                   columns=['Global_active_power', 'Global_intensity', 'Sub_metering_2', 'Sub_metering_3'])
         input_scaled = scaler.transform(input_data)
 
-        # Predict the sub metering 1 for the next day
         prediction = loaded_model.predict(input_scaled)
 
         result = {
@@ -302,23 +297,23 @@ class PredictSubMetering1Weekly(APIView):
     def get(self, request):
         user = request.user
 
-        # Define current week range (assuming week starts on Monday)
+
         current_date = datetime.now().date()
         start_of_week = current_date - timedelta(days=current_date.weekday())
         end_of_week = start_of_week + timedelta(days=6)
 
-        # Convert to aware datetime objects
+
         start_of_week = make_aware(datetime.combine(start_of_week, datetime.min.time()))
         end_of_week = make_aware(datetime.combine(end_of_week, datetime.max.time()))
 
-        # Fetch data for the current week
+
         queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_week, end_of_week))
         data = pd.DataFrame.from_records(queryset.values())
 
         if data.empty:
             return Response({"error": "No data available for the user during the current week"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Aggregate the data (mean, sum, etc.)
+
         aggregated_data = data.mean()
         print(aggregated_data)
         global_active_power = aggregated_data['global_active_power']
@@ -326,16 +321,16 @@ class PredictSubMetering1Weekly(APIView):
         sub_metering_2 = aggregated_data['sub_metering_2']
         sub_metering_3 = aggregated_data['sub_metering_3']
 
-        # Load the KNN model and the scaler
+
         loaded_model = joblib.load('smart_home/Models/Sub_metering_1/best_knn_model_sub_1.pkl')
         scaler = joblib.load('smart_home/Models/Sub_metering_1/scaler_sub_1.pkl')
 
-        # Prepare the input data for prediction
+
         input_data = pd.DataFrame([[global_active_power, global_intensity, sub_metering_2, sub_metering_3]],
                                   columns=['Global_active_power', 'Global_intensity', 'Sub_metering_2', 'Sub_metering_3'])
         input_scaled = scaler.transform(input_data)
 
-        # Predict the sub metering 1 for the next week
+
         prediction = loaded_model.predict(input_scaled)
 
         result = {
@@ -350,39 +345,39 @@ class PredictSubMetering1Monthly(APIView):
     def get(self, request):
         user = request.user
 
-        # Define current month range
+
         current_date = datetime.now().date()
         start_of_month = current_date.replace(day=1)
         end_of_month = start_of_month.replace(day=1, month=start_of_month.month+1) - timedelta(days=1)
 
-        # Convert to aware datetime objects
+
         start_of_month = make_aware(datetime.combine(start_of_month, datetime.min.time()))
         end_of_month = make_aware(datetime.combine(end_of_month, datetime.max.time()))
 
-        # Fetch data for the current month
+
         queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_month, end_of_month))
         data = pd.DataFrame.from_records(queryset.values())
 
         if data.empty:
             return Response({"error": "No data available for the user during the current month"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Aggregate the data (mean, sum, etc.)
+
         aggregated_data = data.mean()
         global_active_power = aggregated_data['global_active_power']
         global_intensity = aggregated_data['global_intensity']
         sub_metering_2 = aggregated_data['sub_metering_2']
         sub_metering_3 = aggregated_data['sub_metering_3']
 
-        # Load the KNN model and the scaler
+
         loaded_model = joblib.load('smart_home/Models/Sub_metering_1/best_knn_model_sub_1.pkl')
         scaler = joblib.load('smart_home/Models/Sub_metering_1/scaler_sub_1.pkl')
 
-        # Prepare the input data for prediction
+
         input_data = pd.DataFrame([[global_active_power, global_intensity, sub_metering_2, sub_metering_3]],
                                   columns=['Global_active_power', 'Global_intensity', 'Sub_metering_2', 'Sub_metering_3'])
         input_scaled = scaler.transform(input_data)
 
-        # Predict the sub metering 1 for the next month
+
         prediction = loaded_model.predict(input_scaled)
 
         result = {
@@ -398,12 +393,12 @@ class PredictSubMetering2Daily(APIView):
     def get(self, request):
         user = request.user
 
-        # Define current day range
+
         current_date = datetime.now().date()
         start_of_day = make_aware(datetime.combine(current_date, datetime.min.time()))
         end_of_day = make_aware(datetime.combine(current_date, datetime.max.time()))
 
-        # Fetch data for the current day
+
         queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_day, end_of_day))
         data = pd.DataFrame.from_records(queryset.values())
 
@@ -418,17 +413,17 @@ class PredictSubMetering2Daily(APIView):
         sub_metering_1 = aggregated_data['sub_metering_1']
         sub_metering_3 = aggregated_data['sub_metering_3']
 
-        # Load the KNN model and the scaler
+
         loaded_model = joblib.load('smart_home/Models/Sub_metering_2/best_knn_model_sub_2.pkl')
         scaler = joblib.load('smart_home/Models/Sub_metering_2/scaler_sub_2.pkl')
 
-        # Prepare the input data for prediction
+
         input_data = pd.DataFrame([[global_active_power, global_intensity, sub_metering_1, sub_metering_3]],
                                   columns=['Global_active_power', 'Global_intensity', 'Sub_metering_1',
                                            'Sub_metering_3'])
         input_scaled = scaler.transform(input_data)
 
-        # Predict the sub metering 1 for the next day
+
         prediction = loaded_model.predict(input_scaled)
 
         result = {
@@ -444,23 +439,23 @@ class PredictSubMetering2Weekly(APIView):
     def get(self, request):
         user = request.user
 
-        # Define current week range (assuming week starts on Monday)
+
         current_date = datetime.now().date()
         start_of_week = current_date - timedelta(days=current_date.weekday())
         end_of_week = start_of_week + timedelta(days=6)
 
-        # Convert to aware datetime objects
+
         start_of_week = make_aware(datetime.combine(start_of_week, datetime.min.time()))
         end_of_week = make_aware(datetime.combine(end_of_week, datetime.max.time()))
 
-        # Fetch data for the current week
+
         queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_week, end_of_week))
         data = pd.DataFrame.from_records(queryset.values())
 
         if data.empty:
             return Response({"error": "No data available for the user during the current week"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Aggregate the data (mean, sum, etc.)
+
         aggregated_data = data.mean()
         print(aggregated_data)
         global_active_power = aggregated_data['global_active_power']
@@ -468,16 +463,16 @@ class PredictSubMetering2Weekly(APIView):
         sub_metering_1 = aggregated_data['sub_metering_1']
         sub_metering_3 = aggregated_data['sub_metering_3']
 
-        # Load the KNN model and the scaler
+
         loaded_model = joblib.load('smart_home/Models/Sub_metering_2/best_knn_model_sub_2.pkl')
         scaler = joblib.load('smart_home/Models/Sub_metering_2/scaler_sub_2.pkl')
 
-        # Prepare the input data for prediction
+
         input_data = pd.DataFrame([[global_active_power, global_intensity, sub_metering_1, sub_metering_3]],
                                   columns=['Global_active_power', 'Global_intensity', 'Sub_metering_1', 'Sub_metering_3'])
         input_scaled = scaler.transform(input_data)
 
-        # Predict the sub metering 1 for the next week
+
         prediction = loaded_model.predict(input_scaled)
 
         result = {
@@ -493,39 +488,35 @@ class PredictSubMetering2Monthly(APIView):
     def get(self, request):
         user = request.user
 
-        # Define current month range
+
         current_date = datetime.now().date()
         start_of_month = current_date.replace(day=1)
         end_of_month = start_of_month.replace(day=1, month=start_of_month.month+1) - timedelta(days=1)
 
-        # Convert to aware datetime objects
+
         start_of_month = make_aware(datetime.combine(start_of_month, datetime.min.time()))
         end_of_month = make_aware(datetime.combine(end_of_month, datetime.max.time()))
 
-        # Fetch data for the current month
         queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_month, end_of_month))
         data = pd.DataFrame.from_records(queryset.values())
 
         if data.empty:
             return Response({"error": "No data available for the user during the current month"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Aggregate the data (mean, sum, etc.)
+
         aggregated_data = data.mean()
         global_active_power = aggregated_data['global_active_power']
         global_intensity = aggregated_data['global_intensity']
         sub_metering_1 = aggregated_data['sub_metering_1']
         sub_metering_3 = aggregated_data['sub_metering_3']
 
-        # Load the KNN model and the scaler
         loaded_model = joblib.load('smart_home/Models/Sub_metering_2/best_knn_model_sub_2.pkl')
         scaler = joblib.load('smart_home/Models/Sub_metering_2/scaler_sub_2.pkl')
 
-        # Prepare the input data for prediction
         input_data = pd.DataFrame([[global_active_power, global_intensity, sub_metering_1, sub_metering_3]],
                                   columns=['Global_active_power', 'Global_intensity', 'Sub_metering_1', 'Sub_metering_3'])
         input_scaled = scaler.transform(input_data)
 
-        # Predict the sub metering 1 for the next month
         prediction = loaded_model.predict(input_scaled)
 
         result = {
@@ -541,12 +532,12 @@ class PredictSubMetering3Daily(APIView):
     def get(self, request):
         user = request.user
 
-        # Define current day range
+
         current_date = datetime.now().date()
         start_of_day = make_aware(datetime.combine(current_date, datetime.min.time()))
         end_of_day = make_aware(datetime.combine(current_date, datetime.max.time()))
 
-        # Fetch data for the current day
+
         queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_day, end_of_day))
         data = pd.DataFrame.from_records(queryset.values())
 
@@ -560,16 +551,13 @@ class PredictSubMetering3Daily(APIView):
         global_intensity = aggregated_data['global_intensity']
 
 
-        # Load the KNN model and the scaler
         loaded_model = joblib.load('smart_home/Models/Sub_metering_3/best_knn_model.pkl')
         scaler = joblib.load('smart_home/Models/Sub_metering_3/scaler.pkl')
 
-        # Prepare the input data for prediction
         input_data = pd.DataFrame([[global_active_power, global_intensity]],
                                   columns=['Global_active_power', 'Global_intensity'])
         input_scaled = scaler.transform(input_data)
 
-        # Predict the sub metering 1 for the next day
         prediction = loaded_model.predict(input_scaled)
 
         result = {
@@ -585,39 +573,36 @@ class PredictSubMetering3Weekly(APIView):
     def get(self, request):
         user = request.user
 
-        # Define current week range (assuming week starts on Monday)
+
         current_date = datetime.now().date()
         start_of_week = current_date - timedelta(days=current_date.weekday())
         end_of_week = start_of_week + timedelta(days=6)
 
-        # Convert to aware datetime objects
+
         start_of_week = make_aware(datetime.combine(start_of_week, datetime.min.time()))
         end_of_week = make_aware(datetime.combine(end_of_week, datetime.max.time()))
 
-        # Fetch data for the current week
+
         queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_week, end_of_week))
         data = pd.DataFrame.from_records(queryset.values())
 
         if data.empty:
             return Response({"error": "No data available for the user during the current week"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Aggregate the data (mean, sum, etc.)
+
         aggregated_data = data.mean()
         print(aggregated_data)
         global_active_power = aggregated_data['global_active_power']
         global_intensity = aggregated_data['global_intensity']
 
 
-        # Load the KNN model and the scaler
         loaded_model = joblib.load('smart_home/Models/Sub_metering_3/best_knn_model.pkl')
         scaler = joblib.load('smart_home/Models/Sub_metering_3/scaler.pkl')
 
-        # Prepare the input data for prediction
         input_data = pd.DataFrame([[global_active_power, global_intensity]],
                                   columns=['Global_active_power', 'Global_intensity'])
         input_scaled = scaler.transform(input_data)
 
-        # Predict the sub metering 1 for the next week
         prediction = loaded_model.predict(input_scaled)
 
         result = {
