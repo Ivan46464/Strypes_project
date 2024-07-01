@@ -3,12 +3,12 @@ import io
 from datetime import datetime, timedelta
 from io import BytesIO
 import random
-
+from ultralytics import YOLOv10
 import matplotlib
 from django.contrib.auth import logout
 from django.contrib.auth.models import User
 from django.http import FileResponse
-from django.utils.timezone import make_aware
+from django.utils.timezone import make_aware, is_naive
 from rest_framework import status
 from rest_framework.authentication import TokenAuthentication, SessionAuthentication
 from rest_framework.authtoken.models import Token
@@ -18,7 +18,6 @@ from rest_framework.generics import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
 from smart_home.models import Home_electricity_consumption
 from smart_home.serializers import CreateUserSerializer, HomeElectricityConsumptionSerializer
 from smart_home.static_numbers import reports
@@ -26,6 +25,8 @@ import pandas as pd
 import tensorflow as tf
 import joblib
 import plotly.express as px
+from rest_framework.parsers import MultiPartParser, FormParser
+from django.core.files.storage import default_storage
 matplotlib.use('agg')
 
 
@@ -95,47 +96,563 @@ class CreateReport(APIView):
             )
             return Response({"message": "Report created successfully"}, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-class PredictGlobalActivePower(APIView):
+class PredictGlobalActivePowerDaily(APIView):
+    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
     def get(self, request):
-        global_intensity = request.query_params.get('global_intensity')
-        voltage = request.query_params.get('voltage')
+        user = request.user
 
 
-        if global_intensity is None or voltage is None:
-            return Response({"error": "Missing parameters"}, status=status.HTTP_400_BAD_REQUEST)
+        current_date = datetime.now().date()
+        start_of_day = make_aware(datetime.combine(current_date, datetime.min.time()))
+        end_of_day = make_aware(datetime.combine(current_date, datetime.max.time()))
 
-        try:
-            global_intensity = float(global_intensity)
-            voltage = float(voltage)
-        except ValueError:
-            return Response({"error": "Invalid parameters type"}, status=status.HTTP_400_BAD_REQUEST)
+
+        queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_day, end_of_day))
+        data = pd.DataFrame.from_records(queryset.values())
+
+        if data.empty:
+            return Response({"error": "No data available for the user on the current day"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+        aggregated_data = data.mean()
+        global_intensity = aggregated_data['global_intensity']
+        voltage = aggregated_data['voltage']
 
         custom_objects = {
             'mse': tf.keras.losses.MeanSquaredError(),
             'mae': tf.keras.metrics.MeanAbsoluteError(),
             'Adam': tf.keras.optimizers.Adam
         }
-
-
         model = tf.keras.models.load_model('smart_home/Models/Global_active_power/my_model.keras', custom_objects=custom_objects)
-
-
         ct = joblib.load('smart_home/Models/Global_active_power/column_transformer.pkl')
 
 
-        koko = pd.DataFrame([[global_intensity, voltage]], columns=['Global_intensity', 'Voltage'])
+        input_data = pd.DataFrame([[global_intensity, voltage]], columns=['Global_intensity', 'Voltage'])
+        input_standardized = ct.transform(input_data)
 
 
-        koko_standardized = ct.transform(koko)
-
-
-        predictions = model.predict(koko_standardized)
+        prediction = model.predict(input_standardized)
 
         result = {
-            "predictions": predictions,
+            "predicted_global_active_power": prediction[0][0]
         }
+
         return Response(result, status=status.HTTP_200_OK)
 
+
+class PredictGlobalActivePowerWeekly(APIView):
+    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+
+        current_date = datetime.now().date()
+        start_of_week = current_date - timedelta(days=current_date.weekday())
+        end_of_week = start_of_week + timedelta(days=6)
+
+
+        start_of_week = make_aware(datetime.combine(start_of_week, datetime.min.time()))
+        end_of_week = make_aware(datetime.combine(end_of_week, datetime.max.time()))
+
+        queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_week, end_of_week))
+        data = pd.DataFrame.from_records(queryset.values())
+
+        if data.empty:
+            return Response({"error": "No data available for the user during the current week"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+        data['date'] = pd.to_datetime(data['date']).dt.date
+        daily_aggregated_data = data.groupby('date').mean()
+
+
+        weekly_averages = daily_aggregated_data.mean()
+        global_intensity = weekly_averages['global_intensity']
+        voltage = weekly_averages['voltage']
+
+
+        custom_objects = {
+            'mse': tf.keras.losses.MeanSquaredError(),
+            'mae': tf.keras.metrics.MeanAbsoluteError(),
+            'Adam': tf.keras.optimizers.Adam
+        }
+        model = tf.keras.models.load_model('smart_home/Models/Global_active_power/my_model.keras', custom_objects=custom_objects)
+        ct = joblib.load('smart_home/Models/Global_active_power/column_transformer.pkl')
+
+
+        input_data = pd.DataFrame([[global_intensity, voltage]], columns=['Global_intensity', 'Voltage'])
+        input_standardized = ct.transform(input_data)
+
+
+        prediction = model.predict(input_standardized)
+
+        result = {
+            "predicted_global_active_power": prediction[0][0]
+        }
+
+        return Response(result, status=status.HTTP_200_OK)
+
+class PredictGlobalActivePowerMonthly(APIView):
+    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+
+        current_date = datetime.now().date()
+        start_of_month = current_date.replace(day=1)
+        next_month = (start_of_month.replace(day=28) + timedelta(days=4)).replace(day=1)
+        end_of_month = next_month - timedelta(days=1)
+
+
+        start_of_month = make_aware(datetime.combine(start_of_month, datetime.min.time()))
+        end_of_month = make_aware(datetime.combine(end_of_month, datetime.max.time()))
+
+
+        queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_month, end_of_month))
+        data = pd.DataFrame.from_records(queryset.values())
+
+        if data.empty:
+            return Response({"error": "No data available for the user during the current month"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+        data['date'] = pd.to_datetime(data['date']).dt.date
+        daily_aggregated_data = data.groupby('date').mean()
+
+
+        monthly_averages = daily_aggregated_data.mean()
+        global_intensity = monthly_averages['global_intensity']
+        voltage = monthly_averages['voltage']
+
+
+        custom_objects = {
+            'mse': tf.keras.losses.MeanSquaredError(),
+            'mae': tf.keras.metrics.MeanAbsoluteError(),
+            'Adam': tf.keras.optimizers.Adam
+        }
+        model = tf.keras.models.load_model('smart_home/Models/Global_active_power/my_model.keras', custom_objects=custom_objects)
+        ct = joblib.load('smart_home/Models/Global_active_power/column_transformer.pkl')
+
+        input_data = pd.DataFrame([[global_intensity, voltage]], columns=['Global_intensity', 'Voltage'])
+        input_standardized = ct.transform(input_data)
+
+        prediction = model.predict(input_standardized)
+
+        result = {
+            "predicted_global_active_power": prediction[0][0]
+        }
+
+        return Response(result, status=status.HTTP_200_OK)
+
+class PredictSubMetering1Daily(APIView):
+    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+
+        current_date = datetime.now().date()
+        start_of_day = make_aware(datetime.combine(current_date, datetime.min.time()))
+        end_of_day = make_aware(datetime.combine(current_date, datetime.max.time()))
+
+        queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_day, end_of_day))
+        data = pd.DataFrame.from_records(queryset.values())
+
+        if data.empty:
+            return Response({"error": "No data available for the user on the current day"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+        aggregated_data = data.mean()
+        print(aggregated_data)
+        global_active_power = aggregated_data['global_active_power']
+        global_intensity = aggregated_data['global_intensity']
+        sub_metering_2 = aggregated_data['sub_metering_2']
+        sub_metering_3 = aggregated_data['sub_metering_3']
+
+
+        loaded_model = joblib.load('smart_home/Models/Sub_metering_1/best_knn_model_sub_1.pkl')
+        scaler = joblib.load('smart_home/Models/Sub_metering_1/scaler_sub_1.pkl')
+
+
+        input_data = pd.DataFrame([[global_active_power, global_intensity, sub_metering_2, sub_metering_3]],
+                                  columns=['Global_active_power', 'Global_intensity', 'Sub_metering_2', 'Sub_metering_3'])
+        input_scaled = scaler.transform(input_data)
+
+        prediction = loaded_model.predict(input_scaled)
+
+        result = {
+            "predicted_sub_metering_1": prediction[0]
+        }
+
+        return Response(result, status=status.HTTP_200_OK)
+class PredictSubMetering1Weekly(APIView):
+    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+
+        current_date = datetime.now().date()
+        start_of_week = current_date - timedelta(days=current_date.weekday())
+        end_of_week = start_of_week + timedelta(days=6)
+
+
+        start_of_week = make_aware(datetime.combine(start_of_week, datetime.min.time()))
+        end_of_week = make_aware(datetime.combine(end_of_week, datetime.max.time()))
+
+
+        queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_week, end_of_week))
+        data = pd.DataFrame.from_records(queryset.values())
+
+        if data.empty:
+            return Response({"error": "No data available for the user during the current week"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+        aggregated_data = data.mean()
+        print(aggregated_data)
+        global_active_power = aggregated_data['global_active_power']
+        global_intensity = aggregated_data['global_intensity']
+        sub_metering_2 = aggregated_data['sub_metering_2']
+        sub_metering_3 = aggregated_data['sub_metering_3']
+
+
+        loaded_model = joblib.load('smart_home/Models/Sub_metering_1/best_knn_model_sub_1.pkl')
+        scaler = joblib.load('smart_home/Models/Sub_metering_1/scaler_sub_1.pkl')
+
+
+        input_data = pd.DataFrame([[global_active_power, global_intensity, sub_metering_2, sub_metering_3]],
+                                  columns=['Global_active_power', 'Global_intensity', 'Sub_metering_2', 'Sub_metering_3'])
+        input_scaled = scaler.transform(input_data)
+
+
+        prediction = loaded_model.predict(input_scaled)
+
+        result = {
+            "predicted_sub_metering_1": prediction[0]
+        }
+
+        return Response(result, status=status.HTTP_200_OK)
+class PredictSubMetering1Monthly(APIView):
+    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+
+        current_date = datetime.now().date()
+        start_of_month = current_date.replace(day=1)
+        end_of_month = start_of_month.replace(day=1, month=start_of_month.month+1) - timedelta(days=1)
+
+
+        start_of_month = make_aware(datetime.combine(start_of_month, datetime.min.time()))
+        end_of_month = make_aware(datetime.combine(end_of_month, datetime.max.time()))
+
+
+        queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_month, end_of_month))
+        data = pd.DataFrame.from_records(queryset.values())
+
+        if data.empty:
+            return Response({"error": "No data available for the user during the current month"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+        aggregated_data = data.mean()
+        global_active_power = aggregated_data['global_active_power']
+        global_intensity = aggregated_data['global_intensity']
+        sub_metering_2 = aggregated_data['sub_metering_2']
+        sub_metering_3 = aggregated_data['sub_metering_3']
+
+
+        loaded_model = joblib.load('smart_home/Models/Sub_metering_1/best_knn_model_sub_1.pkl')
+        scaler = joblib.load('smart_home/Models/Sub_metering_1/scaler_sub_1.pkl')
+
+
+        input_data = pd.DataFrame([[global_active_power, global_intensity, sub_metering_2, sub_metering_3]],
+                                  columns=['Global_active_power', 'Global_intensity', 'Sub_metering_2', 'Sub_metering_3'])
+        input_scaled = scaler.transform(input_data)
+
+
+        prediction = loaded_model.predict(input_scaled)
+
+        result = {
+            "predicted_sub_metering_1": prediction[0]
+        }
+
+        return Response(result, status=status.HTTP_200_OK)
+
+class PredictSubMetering2Daily(APIView):
+    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+
+        current_date = datetime.now().date()
+        start_of_day = make_aware(datetime.combine(current_date, datetime.min.time()))
+        end_of_day = make_aware(datetime.combine(current_date, datetime.max.time()))
+
+
+        queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_day, end_of_day))
+        data = pd.DataFrame.from_records(queryset.values())
+
+        if data.empty:
+            return Response({"error": "No data available for the user on the current day"},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        aggregated_data = data.mean()
+        print(aggregated_data)
+        global_active_power = aggregated_data['global_active_power']
+        global_intensity = aggregated_data['global_intensity']
+        sub_metering_1 = aggregated_data['sub_metering_1']
+        sub_metering_3 = aggregated_data['sub_metering_3']
+
+
+        loaded_model = joblib.load('smart_home/Models/Sub_metering_2/best_knn_model_sub_2.pkl')
+        scaler = joblib.load('smart_home/Models/Sub_metering_2/scaler_sub_2.pkl')
+
+
+        input_data = pd.DataFrame([[global_active_power, global_intensity, sub_metering_1, sub_metering_3]],
+                                  columns=['Global_active_power', 'Global_intensity', 'Sub_metering_1',
+                                           'Sub_metering_3'])
+        input_scaled = scaler.transform(input_data)
+
+
+        prediction = loaded_model.predict(input_scaled)
+
+        result = {
+            "predicted_sub_metering_2": prediction[0]
+        }
+
+        return Response(result, status=status.HTTP_200_OK)
+
+class PredictSubMetering2Weekly(APIView):
+    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+
+        current_date = datetime.now().date()
+        start_of_week = current_date - timedelta(days=current_date.weekday())
+        end_of_week = start_of_week + timedelta(days=6)
+
+
+        start_of_week = make_aware(datetime.combine(start_of_week, datetime.min.time()))
+        end_of_week = make_aware(datetime.combine(end_of_week, datetime.max.time()))
+
+
+        queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_week, end_of_week))
+        data = pd.DataFrame.from_records(queryset.values())
+
+        if data.empty:
+            return Response({"error": "No data available for the user during the current week"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+        aggregated_data = data.mean()
+        print(aggregated_data)
+        global_active_power = aggregated_data['global_active_power']
+        global_intensity = aggregated_data['global_intensity']
+        sub_metering_1 = aggregated_data['sub_metering_1']
+        sub_metering_3 = aggregated_data['sub_metering_3']
+
+
+        loaded_model = joblib.load('smart_home/Models/Sub_metering_2/best_knn_model_sub_2.pkl')
+        scaler = joblib.load('smart_home/Models/Sub_metering_2/scaler_sub_2.pkl')
+
+
+        input_data = pd.DataFrame([[global_active_power, global_intensity, sub_metering_1, sub_metering_3]],
+                                  columns=['Global_active_power', 'Global_intensity', 'Sub_metering_1', 'Sub_metering_3'])
+        input_scaled = scaler.transform(input_data)
+
+
+        prediction = loaded_model.predict(input_scaled)
+
+        result = {
+            "predicted_sub_metering_2": prediction[0]
+        }
+
+        return Response(result, status=status.HTTP_200_OK)
+
+class PredictSubMetering2Monthly(APIView):
+    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+
+        current_date = datetime.now().date()
+        start_of_month = current_date.replace(day=1)
+        end_of_month = start_of_month.replace(day=1, month=start_of_month.month+1) - timedelta(days=1)
+
+
+        start_of_month = make_aware(datetime.combine(start_of_month, datetime.min.time()))
+        end_of_month = make_aware(datetime.combine(end_of_month, datetime.max.time()))
+
+        queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_month, end_of_month))
+        data = pd.DataFrame.from_records(queryset.values())
+
+        if data.empty:
+            return Response({"error": "No data available for the user during the current month"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+        aggregated_data = data.mean()
+        global_active_power = aggregated_data['global_active_power']
+        global_intensity = aggregated_data['global_intensity']
+        sub_metering_1 = aggregated_data['sub_metering_1']
+        sub_metering_3 = aggregated_data['sub_metering_3']
+
+        loaded_model = joblib.load('smart_home/Models/Sub_metering_2/best_knn_model_sub_2.pkl')
+        scaler = joblib.load('smart_home/Models/Sub_metering_2/scaler_sub_2.pkl')
+
+        input_data = pd.DataFrame([[global_active_power, global_intensity, sub_metering_1, sub_metering_3]],
+                                  columns=['Global_active_power', 'Global_intensity', 'Sub_metering_1', 'Sub_metering_3'])
+        input_scaled = scaler.transform(input_data)
+
+        prediction = loaded_model.predict(input_scaled)
+
+        result = {
+            "predicted_sub_metering_2": prediction[0]
+        }
+
+        return Response(result, status=status.HTTP_200_OK)
+
+class PredictSubMetering3Daily(APIView):
+    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+
+        current_date = datetime.now().date()
+        start_of_day = make_aware(datetime.combine(current_date, datetime.min.time()))
+        end_of_day = make_aware(datetime.combine(current_date, datetime.max.time()))
+
+
+        queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_day, end_of_day))
+        data = pd.DataFrame.from_records(queryset.values())
+
+        if data.empty:
+            return Response({"error": "No data available for the user on the current day"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+        aggregated_data = data.mean()
+        print(aggregated_data)
+        global_active_power = aggregated_data['global_active_power']
+        global_intensity = aggregated_data['global_intensity']
+
+
+        loaded_model = joblib.load('smart_home/Models/Sub_metering_3/best_knn_model.pkl')
+        scaler = joblib.load('smart_home/Models/Sub_metering_3/scaler.pkl')
+
+        input_data = pd.DataFrame([[global_active_power, global_intensity]],
+                                  columns=['Global_active_power', 'Global_intensity'])
+        input_scaled = scaler.transform(input_data)
+
+        prediction = loaded_model.predict(input_scaled)
+
+        result = {
+            "predicted_sub_metering_3": prediction[0]
+        }
+
+        return Response(result, status=status.HTTP_200_OK)
+
+class PredictSubMetering3Weekly(APIView):
+    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+
+        current_date = datetime.now().date()
+        start_of_week = current_date - timedelta(days=current_date.weekday())
+        end_of_week = start_of_week + timedelta(days=6)
+
+
+        start_of_week = make_aware(datetime.combine(start_of_week, datetime.min.time()))
+        end_of_week = make_aware(datetime.combine(end_of_week, datetime.max.time()))
+
+
+        queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_week, end_of_week))
+        data = pd.DataFrame.from_records(queryset.values())
+
+        if data.empty:
+            return Response({"error": "No data available for the user during the current week"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+        aggregated_data = data.mean()
+        print(aggregated_data)
+        global_active_power = aggregated_data['global_active_power']
+        global_intensity = aggregated_data['global_intensity']
+
+
+        loaded_model = joblib.load('smart_home/Models/Sub_metering_3/best_knn_model.pkl')
+        scaler = joblib.load('smart_home/Models/Sub_metering_3/scaler.pkl')
+
+        input_data = pd.DataFrame([[global_active_power, global_intensity]],
+                                  columns=['Global_active_power', 'Global_intensity'])
+        input_scaled = scaler.transform(input_data)
+
+        prediction = loaded_model.predict(input_scaled)
+
+        result = {
+            "predicted_sub_metering_3": prediction[0]
+        }
+
+        return Response(result, status=status.HTTP_200_OK)
+
+class PredictSubMetering3Monthly(APIView):
+    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+        current_date = datetime.now().date()
+        start_of_month = current_date.replace(day=1)
+        end_of_month = start_of_month.replace(day=1, month=start_of_month.month+1) - timedelta(days=1)
+
+        start_of_month = make_aware(datetime.combine(start_of_month, datetime.min.time()))
+        end_of_month = make_aware(datetime.combine(end_of_month, datetime.max.time()))
+
+        queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_month, end_of_month))
+        data = pd.DataFrame.from_records(queryset.values())
+
+        if data.empty:
+            return Response({"error": "No data available for the user during the current month"}, status=status.HTTP_400_BAD_REQUEST)
+
+        aggregated_data = data.mean()
+        global_active_power = aggregated_data['global_active_power']
+        global_intensity = aggregated_data['global_intensity']
+
+
+
+        loaded_model = joblib.load('smart_home/Models/Sub_metering_3/best_knn_model.pkl')
+        scaler = joblib.load('smart_home/Models/Sub_metering_3/scaler.pkl')
+
+
+        input_data = pd.DataFrame([[global_active_power, global_intensity]],
+                                  columns=['Global_active_power', 'Global_intensity'])
+        input_scaled = scaler.transform(input_data)
+
+
+        prediction = loaded_model.predict(input_scaled)
+
+        result = {
+            "predicted_sub_metering_3": prediction[0]
+        }
+
+        return Response(result, status=status.HTTP_200_OK)
 
 class GenerateCurrentDayPlotForGlobalActivePower(APIView):
     authentication_classes = [TokenAuthentication, SessionAuthentication]
@@ -726,62 +1243,39 @@ class GenerateMonthlyPlotForSubMetering3(APIView):
         return FileResponse(buffer, content_type='image/png')
 
 
-
-class PredictAndPlot(APIView):
+class ObjectDetect(APIView):
     authentication_classes = [TokenAuthentication, SessionAuthentication]
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+    def post(self, request):
 
-    def get(self, request):
-        user = request.user
+        if 'file' not in request.data:
+            return Response({'error': 'No file uploaded'}, status=status.HTTP_400_BAD_REQUEST)
 
-        queryset = Home_electricity_consumption.objects.filter(user=user)
-        data = pd.DataFrame.from_records(queryset.values())
+        uploaded_file = request.data['file']
+        file_path = default_storage.save(f'tmp/{uploaded_file.name}', uploaded_file)
 
-        if data.empty:
-            return Response({"error": "No data available for the user"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
 
+            model = YOLOv10('smart_home/Models/YoloV10/best.pt')
+            results = model(file_path, conf=0.25)
+            names = {
+                0: 'bed', 1: 'chair', 2: 'couch', 3: 'dining table', 4: 'laptop', 5: 'microwave',
+                6: 'oven', 7: 'refrigerator', 8: 'sink', 9: 'toaster', 10: 'toilet', 11: 'tv'
+            }
+            answers = []
 
-        data['date'] = pd.to_datetime(data['date'])
-        daily_data = data.resample('D', on='date').sum().reset_index()
-        weekly_data = data.resample('W', on='date').sum().reset_index()
-        monthly_data = data.resample('M', on='date').sum().reset_index()
-
-
-        custom_objects = {
-            'mse': tf.keras.losses.MeanSquaredError(),
-            'mae': tf.keras.metrics.MeanAbsoluteError(),
-            'Adam': tf.keras.optimizers.Adam
-        }
-        model = tf.keras.models.load_model('smart_home/Models/Global_active_power/my_model.keras', custom_objects=custom_objects)
-
-
-        ct = joblib.load('smart_home/Models/Global_active_power/column_transformer.pkl')
+            for r in results:
+                for box in r.boxes:
+                    if box.cls.item() in names.keys():
+                        answers.append(names[box.cls.item()])
 
 
-        daily_predictions = self.make_predictions(daily_data, model, ct)
-        daily_data['predictions'] = daily_predictions
+            default_storage.delete(file_path)
 
+            return Response({'results': answers}, status=status.HTTP_200_OK)
 
-        daily_fig = self.generate_plot_with_predictions(daily_data, 'Daily Global Active Power with Predictions')
-        weekly_fig = self.generate_plot(weekly_data, 'Weekly Global Active Power')
-        monthly_fig = self.generate_plot(monthly_data, 'Monthly Global Active Power')
+        except Exception as e:
+            default_storage.delete(file_path)
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
-        daily_plot = daily_fig.to_json()
-        weekly_plot = weekly_fig.to_json()
-        monthly_plot = monthly_fig.to_json()
-
-        return Response({
-            "daily_plot": daily_plot,
-            "weekly_plot": weekly_plot,
-            "monthly_plot": monthly_plot
-        }, status=status.HTTP_200_OK)
-
-    def make_predictions(self, data, model, ct):
-        data_prepared = ct.transform(data[['global_intensity', 'voltage']])
-        predictions = model.predict(data_prepared)
-        return predictions
-
-    def generate_plot_with_predictions(self, data, title):
-        fig = px.line(data, x='date', y=['global_active_power', 'predictions'], title=title)
-        return fig
