@@ -254,8 +254,6 @@ class PredictSubMetering1Daily(APIView):
 
     def get(self, request):
         user = request.user
-
-
         current_date = datetime.now().date()
         start_of_day = make_aware(datetime.combine(current_date, datetime.min.time()))
         end_of_day = make_aware(datetime.combine(current_date, datetime.max.time()))
@@ -265,8 +263,6 @@ class PredictSubMetering1Daily(APIView):
 
         if data.empty:
             return Response({"error": "No data available for the user on the current day"}, status=status.HTTP_400_BAD_REQUEST)
-
-
         aggregated_data = data.mean()
         print(aggregated_data)
         global_active_power = aggregated_data['global_active_power']
@@ -286,7 +282,7 @@ class PredictSubMetering1Daily(APIView):
         prediction = loaded_model.predict(input_scaled)
 
         result = {
-            "predicted_sub_metering_1": prediction[0]
+            "predicted_sub_metering1": prediction[0]
         }
 
         return Response(result, status=status.HTTP_200_OK)
@@ -334,7 +330,7 @@ class PredictSubMetering1Weekly(APIView):
         prediction = loaded_model.predict(input_scaled)
 
         result = {
-            "predicted_sub_metering_1": prediction[0]
+            "predicted_sub_metering1": prediction[0]
         }
 
         return Response(result, status=status.HTTP_200_OK)
@@ -381,7 +377,7 @@ class PredictSubMetering1Monthly(APIView):
         prediction = loaded_model.predict(input_scaled)
 
         result = {
-            "predicted_sub_metering_1": prediction[0]
+            "predicted_sub_metering1": prediction[0]
         }
 
         return Response(result, status=status.HTTP_200_OK)
@@ -427,7 +423,7 @@ class PredictSubMetering2Daily(APIView):
         prediction = loaded_model.predict(input_scaled)
 
         result = {
-            "predicted_sub_metering_2": prediction[0]
+            "predicted_sub_metering2": prediction[0]
         }
 
         return Response(result, status=status.HTTP_200_OK)
@@ -476,7 +472,7 @@ class PredictSubMetering2Weekly(APIView):
         prediction = loaded_model.predict(input_scaled)
 
         result = {
-            "predicted_sub_metering_2": prediction[0]
+            "predicted_sub_metering2": prediction[0]
         }
 
         return Response(result, status=status.HTTP_200_OK)
@@ -520,7 +516,7 @@ class PredictSubMetering2Monthly(APIView):
         prediction = loaded_model.predict(input_scaled)
 
         result = {
-            "predicted_sub_metering_2": prediction[0]
+            "predicted_sub_metering2": prediction[0]
         }
 
         return Response(result, status=status.HTTP_200_OK)
@@ -561,7 +557,7 @@ class PredictSubMetering3Daily(APIView):
         prediction = loaded_model.predict(input_scaled)
 
         result = {
-            "predicted_sub_metering_3": prediction[0]
+            "predicted_sub_metering3": prediction[0]
         }
 
         return Response(result, status=status.HTTP_200_OK)
@@ -606,7 +602,7 @@ class PredictSubMetering3Weekly(APIView):
         prediction = loaded_model.predict(input_scaled)
 
         result = {
-            "predicted_sub_metering_3": prediction[0]
+            "predicted_sub_metering3": prediction[0]
         }
 
         return Response(result, status=status.HTTP_200_OK)
@@ -649,23 +645,25 @@ class PredictSubMetering3Monthly(APIView):
         prediction = loaded_model.predict(input_scaled)
 
         result = {
-            "predicted_sub_metering_3": prediction[0]
+            "predicted_sub_metering3": prediction[0]
         }
 
         return Response(result, status=status.HTTP_200_OK)
 
-class GenerateCurrentDayPlotForGlobalActivePower(APIView):
+class BaseGenerateDailyPlot(APIView):
     authentication_classes = [TokenAuthentication, SessionAuthentication]
     permission_classes = [IsAuthenticated]
+
+    metering_field = None
+    plot_title = None
+    plot_ylabel = None
 
     def get(self, request):
         user = request.user
 
-
         current_date = datetime.now().date()
         start_of_day = make_aware(datetime.combine(current_date, datetime.min.time()))
         end_of_day = make_aware(datetime.combine(current_date, datetime.max.time()))
-
 
         queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_day, end_of_day))
         data = pd.DataFrame.from_records(queryset.values())
@@ -673,356 +671,119 @@ class GenerateCurrentDayPlotForGlobalActivePower(APIView):
         if data.empty:
             return Response({"error": "No data available for the user on the current day"}, status=status.HTTP_400_BAD_REQUEST)
 
-
         data['date'] = pd.to_datetime(data['date'])
         data = data[(data['date'] >= start_of_day) & (data['date'] <= end_of_day)]
 
-
-        hourly_data = data.groupby(data['date'].dt.hour)['global_active_power'].mean().reset_index()
-
+        hourly_data = data.groupby(data['date'].dt.hour)[self.metering_field].mean().reset_index()
 
         plt.figure(figsize=(10, 6))
-        plt.plot(hourly_data['date'], hourly_data['global_active_power'], marker='o')
-        plt.title('Average Hourly Global Active Power for the Current Day')
+        plt.plot(hourly_data['date'], hourly_data[self.metering_field], marker='o')
+        plt.title(self.plot_title)
         plt.xlabel('Hour of Day')
-        plt.ylabel('Global Active Power')
+        plt.ylabel(self.plot_ylabel)
         plt.grid(True)
-
-
         plt.xticks(hourly_data['date'], hourly_data['date'])
-
 
         buffer = io.BytesIO()
         plt.savefig(buffer, format='png')
         plt.close()
         buffer.seek(0)
 
-
         return FileResponse(buffer, content_type='image/png')
 
-class GenerateDailyPlotForSubMetering1(APIView):
+class GenerateDailyPlotForGlobalActivePower(BaseGenerateDailyPlot):
+    metering_field = 'global_active_power'
+    plot_title = 'Average Hourly Global Active Power for the Current Day'
+    plot_ylabel = 'Global Active Power'
+
+
+class GenerateDailyPlotForSubMetering1(BaseGenerateDailyPlot):
+    metering_field = 'sub_metering_1'
+    plot_title = 'Average Hourly Consumption for the Kitchen for the Current Day'
+    plot_ylabel = 'Consumption by Kitchen'
+
+
+class GenerateDailyPlotForSubMetering2(BaseGenerateDailyPlot):
+    metering_field = 'sub_metering_2'
+    plot_title = 'Average Hourly Consumption for the Laundry Room for the Current Day'
+    plot_ylabel = 'Consumption by Laundry Room'
+
+
+class GenerateDailyPlotForSubMetering3(BaseGenerateDailyPlot):
+    metering_field = 'sub_metering_3'
+    plot_title = 'Average Hourly Consumption for the Living Room for the Current Day'
+    plot_ylabel = 'Consumption by Living Room'
+
+class BaseGenerateWeeklyPlot(APIView):
+    metering_field = None
+    plot_title = None
+    plot_ylabel = None
     authentication_classes = [TokenAuthentication, SessionAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         user = request.user
 
-
         current_date = datetime.now().date()
-        start_of_day = make_aware(datetime.combine(current_date, datetime.min.time()))
-        end_of_day = make_aware(datetime.combine(current_date, datetime.max.time()))
-        queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_day, end_of_day))
+        start_of_week = current_date - timedelta(days=current_date.weekday())
+        end_of_week = start_of_week + timedelta(days=6)
+
+        start_of_week = make_aware(datetime.combine(start_of_week, datetime.min.time()))
+        end_of_week = make_aware(datetime.combine(end_of_week, datetime.max.time()))
+
+        queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_week, end_of_week))
         data = pd.DataFrame.from_records(queryset.values())
 
         if data.empty:
-            return Response({"error": "No data available for the user on the current day"},
+            return Response({"error": "No data available for the user in the current week"},
                             status=status.HTTP_400_BAD_REQUEST)
 
-
-        data['date'] = pd.to_datetime(data['date'])
-        data = data[(data['date'] >= start_of_day) & (data['date'] <= end_of_day)]
-        hourly_data = data.groupby(data['date'].dt.hour)['sub_metering_1'].mean().reset_index()
-
-        plt.figure(figsize=(10, 6))
-        plt.plot(hourly_data['date'], hourly_data['sub_metering_1'], marker='o')
-        plt.title('Average Hourly for the kitchen for the Current Day')
-        plt.xlabel('Hour of Day')
-        plt.ylabel('Consumption by kitchen')
-        plt.grid(True)
-
-
-        plt.xticks(hourly_data['date'], hourly_data['date'])
-
-
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png')
-        plt.close()
-        buffer.seek(0)
-
-
-        return FileResponse(buffer, content_type='image/png')
-class GenerateDailyPlotForSubMetering2(APIView):
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        user = request.user
-
-
-        current_date = datetime.now().date()
-        start_of_day = make_aware(datetime.combine(current_date, datetime.min.time()))
-        end_of_day = make_aware(datetime.combine(current_date, datetime.max.time()))
-        queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_day, end_of_day))
-        data = pd.DataFrame.from_records(queryset.values())
-
-        if data.empty:
-            return Response({"error": "No data available for the user on the current day"},
-                            status=status.HTTP_400_BAD_REQUEST)
-
-
-        data['date'] = pd.to_datetime(data['date'])
-        data = data[(data['date'] >= start_of_day) & (data['date'] <= end_of_day)]
-        hourly_data = data.groupby(data['date'].dt.hour)['sub_metering_2'].mean().reset_index()
-
-
-        plt.figure(figsize=(10, 6))
-        plt.plot(hourly_data['date'], hourly_data['sub_metering_2'], marker='o')
-        plt.title('Average Hourly for the laundry room for the Current Day')
-        plt.xlabel('Hour of Day')
-        plt.ylabel('Consumption by laundry room')
-        plt.grid(True)
-
-
-        plt.xticks(hourly_data['date'], hourly_data['date'])
-
-
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png')
-        plt.close()
-        buffer.seek(0)
-
-
-        return FileResponse(buffer, content_type='image/png')
-
-class GenerateDailyPlotForSubMetering3(APIView):
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        user = request.user
-
-
-        current_date = datetime.now().date()
-        start_of_day = make_aware(datetime.combine(current_date, datetime.min.time()))
-        end_of_day = make_aware(datetime.combine(current_date, datetime.max.time()))
-        queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_day, end_of_day))
-        data = pd.DataFrame.from_records(queryset.values())
-
-        if data.empty:
-            return Response({"error": "No data available for the user on the current day"},
-                            status=status.HTTP_400_BAD_REQUEST)
-
-
-        data['date'] = pd.to_datetime(data['date'])
-        data = data[(data['date'] >= start_of_day) & (data['date'] <= end_of_day)]
-        hourly_data = data.groupby(data['date'].dt.hour)['sub_metering_3'].mean().reset_index()
-
-
-        plt.figure(figsize=(10, 6))
-        plt.plot(hourly_data['date'], hourly_data['sub_metering_3'], marker='o')
-        plt.title('Average Hourly for the living room for the Current Day')
-        plt.xlabel('Hour of Day')
-        plt.ylabel('Consumption by living room')
-        plt.grid(True)
-
-
-        plt.xticks(hourly_data['date'], hourly_data['date'])
-
-
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png')
-        plt.close()
-        buffer.seek(0)
-
-
-        return FileResponse(buffer, content_type='image/png')
-class GenerateWeeklyPlotForGlobalActivePower(APIView):
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        user = request.user
-
-
-        current_date = datetime.now().date()
-        start_of_week = current_date - timedelta(days=current_date.weekday())
-        end_of_week = start_of_week + timedelta(days=6)
-
-        start_of_week = make_aware(datetime.combine(start_of_week, datetime.min.time()))
-        end_of_week = make_aware(datetime.combine(end_of_week, datetime.max.time()))
-
-
-        queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_week, end_of_week))
-        data = pd.DataFrame.from_records(queryset.values())
-
-        if data.empty:
-            return Response({"error": "No data available for the user in the current week"}, status=status.HTTP_400_BAD_REQUEST)
-
-
         data['date'] = pd.to_datetime(data['date'])
         data = data[(data['date'] >= start_of_week) & (data['date'] <= end_of_week)]
 
-
-        daily_data = data.groupby(data['date'].dt.date)['global_active_power'].mean().reset_index()
-
+        daily_data = data.groupby(data['date'].dt.date)[self.metering_field].mean().reset_index()
 
         plt.figure(figsize=(10, 6))
-        plt.plot(daily_data['date'], daily_data['global_active_power'], marker='o')
-        plt.title('Average Daily Global Active Power for the Current Week')
+        plt.plot(daily_data['date'], daily_data[self.metering_field], marker='o')
+        plt.title(self.plot_title)
         plt.xlabel('Date')
-        plt.ylabel('Global Active Power')
+        plt.ylabel(self.plot_ylabel)
         plt.grid(True)
 
-
-        plt.xticks(daily_data['date'], daily_data['date'].apply(lambda x: x.strftime('%Y-%m-%d')), rotation=45)
-
+        plt.xticks(daily_data['date'], daily_data['date'].apply(lambda x: x.strftime('%Y-%m-%d')))
 
         buffer = io.BytesIO()
         plt.savefig(buffer, format='png')
         plt.close()
         buffer.seek(0)
 
-
         return FileResponse(buffer, content_type='image/png')
+class GenerateWeeklyPlotForGlobalActivePower(BaseGenerateWeeklyPlot):
+    metering_field = 'global_active_power'
+    plot_title = 'Average Daily Global Active Power for the Current Week'
+    plot_ylabel = 'Global Active Power'
 
-class GenerateWeeklyPlotForSubMetering1(APIView):
+class GenerateWeeklyPlotForSubMetering1(BaseGenerateWeeklyPlot):
+    metering_field = 'sub_metering_1'
+    plot_title = 'Average Daily Consumption of the kitchen for the Current Week'
+    plot_ylabel = 'Kitchen consumption'
+
+class GenerateWeeklyPlotForSubMetering2(BaseGenerateWeeklyPlot):
+    metering_field = 'sub_metering_3'
+    plot_title = 'Average Daily Consumption of the laundry room for the Current Week'
+    plot_ylabel = 'Living room consumption'
+
+class GenerateWeeklyPlotForSubMetering3(BaseGenerateWeeklyPlot):
+    metering_field = 'sub_metering_3'
+    plot_title = 'Average Daily Consumption of the Living room for the Current Week'
+    plot_ylabel = 'Laundry room consumption'
+
+class BaseGenerateMonthlyPlot(APIView):
     authentication_classes = [TokenAuthentication, SessionAuthentication]
     permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        user = request.user
-
-        current_date = datetime.now().date()
-        start_of_week = current_date - timedelta(days=current_date.weekday())
-        end_of_week = start_of_week + timedelta(days=6)
-
-        start_of_week = make_aware(datetime.combine(start_of_week, datetime.min.time()))
-        end_of_week = make_aware(datetime.combine(end_of_week, datetime.max.time()))
-
-
-        queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_week, end_of_week))
-        data = pd.DataFrame.from_records(queryset.values())
-
-        if data.empty:
-            return Response({"error": "No data available for the user in the current week"}, status=status.HTTP_400_BAD_REQUEST)
-
-
-        data['date'] = pd.to_datetime(data['date'])
-        data = data[(data['date'] >= start_of_week) & (data['date'] <= end_of_week)]
-
-
-        daily_data = data.groupby(data['date'].dt.date)['sub_metering_1'].mean().reset_index()
-
-
-        plt.figure(figsize=(10, 6))
-        plt.plot(daily_data['date'], daily_data['sub_metering_1'], marker='o')
-        plt.title('Average Daily Consumption of the kitchen for the Current Week')
-        plt.xlabel('Date')
-        plt.ylabel('Kitchen consumption')
-        plt.grid(True)
-
-
-        plt.xticks(daily_data['date'], daily_data['date'].apply(lambda x: x.strftime('%Y-%m-%d')), rotation=45)
-
-
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png')
-        plt.close()
-        buffer.seek(0)
-
-
-        return FileResponse(buffer, content_type='image/png')
-class GenerateWeeklyPlotForSubMetering2(APIView):
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        user = request.user
-
-
-        current_date = datetime.now().date()
-        start_of_week = current_date - timedelta(days=current_date.weekday())
-        end_of_week = start_of_week + timedelta(days=6)
-
-        start_of_week = make_aware(datetime.combine(start_of_week, datetime.min.time()))
-        end_of_week = make_aware(datetime.combine(end_of_week, datetime.max.time()))
-
-
-        queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_week, end_of_week))
-        data = pd.DataFrame.from_records(queryset.values())
-
-        if data.empty:
-            return Response({"error": "No data available for the user in the current week"}, status=status.HTTP_400_BAD_REQUEST)
-
-
-        data['date'] = pd.to_datetime(data['date'])
-        data = data[(data['date'] >= start_of_week) & (data['date'] <= end_of_week)]
-
-
-        daily_data = data.groupby(data['date'].dt.date)['sub_metering_2'].mean().reset_index()
-
-
-        plt.figure(figsize=(10, 6))
-        plt.plot(daily_data['date'], daily_data['sub_metering_2'], marker='o')
-        plt.title('Average Daily Consumption of the laundry room for the Current Week')
-        plt.xlabel('Date')
-        plt.ylabel('Laundry room consumption')
-        plt.grid(True)
-
-
-        plt.xticks(daily_data['date'], daily_data['date'].apply(lambda x: x.strftime('%Y-%m-%d')), rotation=45)
-
-
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png')
-        plt.close()
-        buffer.seek(0)
-
-
-        return FileResponse(buffer, content_type='image/png')
-
-class GenerateWeeklyPlotForSubMetering3(APIView):
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        user = request.user
-
-
-        current_date = datetime.now().date()
-        start_of_week = current_date - timedelta(days=current_date.weekday())
-        end_of_week = start_of_week + timedelta(days=6)
-
-        start_of_week = make_aware(datetime.combine(start_of_week, datetime.min.time()))
-        end_of_week = make_aware(datetime.combine(end_of_week, datetime.max.time()))
-
-
-        queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_week, end_of_week))
-        data = pd.DataFrame.from_records(queryset.values())
-
-        if data.empty:
-            return Response({"error": "No data available for the user in the current week"}, status=status.HTTP_400_BAD_REQUEST)
-
-
-        data['date'] = pd.to_datetime(data['date'])
-        data = data[(data['date'] >= start_of_week) & (data['date'] <= end_of_week)]
-
-
-        daily_data = data.groupby(data['date'].dt.date)['sub_metering_3'].mean().reset_index()
-
-
-        plt.figure(figsize=(10, 6))
-        plt.plot(daily_data['date'], daily_data['sub_metering_3'], marker='o')
-        plt.title('Average Daily Consumption of the Living room for the Current Week')
-        plt.xlabel('Date')
-        plt.ylabel('Living room consumption')
-        plt.grid(True)
-
-
-        plt.xticks(daily_data['date'], daily_data['date'].apply(lambda x: x.strftime('%Y-%m-%d')), rotation=45)
-
-
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png')
-        plt.close()
-        buffer.seek(0)
-
-
-        return FileResponse(buffer, content_type='image/png')
-class GenerateMonthlyPlotForGlobalActivePower(APIView):
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
-    permission_classes = [IsAuthenticated]
-
+    metering_field = None
+    plot_title = None
+    plot_ylabel = None
     def get(self, request):
         user = request.user
 
@@ -1046,22 +807,22 @@ class GenerateMonthlyPlotForGlobalActivePower(APIView):
 
 
         data.set_index('date', inplace=True)
-        daily_data = data['global_active_power'].resample('D').mean().reset_index()
+        daily_data = data[self.metering_field].resample('D').mean().reset_index()
 
 
         all_days = pd.date_range(start=start_of_month, end=end_of_month, freq='D')
         daily_data = daily_data.set_index('date').reindex(all_days).reset_index()
-        daily_data.columns = ['date', 'global_active_power']
+        daily_data.columns = ['date', self.metering_field]
 
 
-        daily_data['global_active_power'].fillna(0, inplace=True)
+        daily_data[self.metering_field].fillna(0, inplace=True)
 
 
         plt.figure(figsize=(10, 6))
-        plt.plot(daily_data['date'], daily_data['global_active_power'], marker='o')
-        plt.title('Average Daily Global Active Power for the Current Month')
+        plt.plot(daily_data['date'], daily_data[self.metering_field], marker='o')
+        plt.title(self.plot_title)
         plt.xlabel('Date')
-        plt.ylabel('Global Active Power')
+        plt.ylabel(self.plot_ylabel)
         plt.grid(True)
 
 
@@ -1076,172 +837,25 @@ class GenerateMonthlyPlotForGlobalActivePower(APIView):
 
 
         return FileResponse(buffer, content_type='image/png')
+class GenerateMonthlyPlotForGlobalActivePower(BaseGenerateMonthlyPlot):
+    metering_field = 'global_active_power'
+    plot_title ='Average Daily Global Active Power for the Current Month'
+    plot_ylabel = 'Global Active Power'
 
-class GenerateMonthlyPlotForSubMetering1(APIView):
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
-    permission_classes = [IsAuthenticated]
+class GenerateMonthlyPlotForSubMetering1(BaseGenerateMonthlyPlot):
+    metering_field = 'sub_metering_1'
+    plot_title ='Average Daily Consumption for the kitchen for the Current Month'
+    plot_ylabel = 'Kitchen consumption'
 
-    def get(self, request):
-        user = request.user
+class GenerateMonthlyPlotForSubMetering2(BaseGenerateMonthlyPlot):
+    metering_field = 'sub_metering_2'
+    plot_title ='Average Daily Consumption for the Laundry Room for the Current Month'
+    plot_ylabel = 'Laundry Room Consumption'
 
-
-        current_date = datetime.now().date()
-        start_of_month = make_aware(datetime(current_date.year, current_date.month, 1))
-        end_of_month = make_aware(
-            datetime.combine((datetime(current_date.year, current_date.month, 1) + pd.offsets.MonthEnd()).date(),
-                             datetime.max.time()))
-
-        queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_month, end_of_month))
-        data = pd.DataFrame.from_records(queryset.values())
-
-        if data.empty:
-            return Response({"error": "No data available for the user in the current month"},
-                            status=status.HTTP_400_BAD_REQUEST)
-
-
-        data['date'] = pd.to_datetime(data['date'])
-
-
-        data.set_index('date', inplace=True)
-        daily_data = data['sub_metering_1'].resample('D').mean().reset_index()
-
-
-        all_days = pd.date_range(start=start_of_month, end=end_of_month, freq='D')
-        daily_data = daily_data.set_index('date').reindex(all_days).reset_index()
-        daily_data.columns = ['date', 'sub_metering_1']
-
-
-        daily_data['sub_metering_1'].fillna(0, inplace=True)
-
-
-        plt.figure(figsize=(10, 6))
-        plt.plot(daily_data['date'], daily_data['sub_metering_1'], marker='o')
-        plt.title('Average Daily Consumption for the kitchen for the Current Month')
-        plt.xlabel('Date')
-        plt.ylabel('Global Active Power')
-        plt.grid(True)
-
-
-        plt.gca().set_xticks(daily_data['date'])
-        plt.gca().set_xticklabels(daily_data['date'].dt.strftime('%d'))
-
-
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png')
-        plt.close()
-        buffer.seek(0)
-
-
-        return FileResponse(buffer, content_type='image/png')
-
-class GenerateMonthlyPlotForSubMetering2(APIView):
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        user = request.user
-
-
-        current_date = datetime.now().date()
-        start_of_month = make_aware(datetime(current_date.year, current_date.month, 1))
-        end_of_month = make_aware(
-            datetime.combine((datetime(current_date.year, current_date.month, 1) + pd.offsets.MonthEnd()).date(),
-                             datetime.max.time()))
-
-
-        queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_month, end_of_month))
-        data = pd.DataFrame.from_records(queryset.values())
-
-        if data.empty:
-            return Response({"error": "No data available for the user in the current month"},
-                            status=status.HTTP_400_BAD_REQUEST)
-
-
-        data['date'] = pd.to_datetime(data['date'])
-
-
-        data.set_index('date', inplace=True)
-        daily_data = data['sub_metering_2'].resample('D').mean().reset_index()
-
-
-        all_days = pd.date_range(start=start_of_month, end=end_of_month, freq='D')
-        daily_data = daily_data.set_index('date').reindex(all_days).reset_index()
-        daily_data.columns = ['date', 'sub_metering_2']
-
-
-        daily_data['sub_metering_2'].fillna(0, inplace=True)
-
-
-        plt.figure(figsize=(10, 6))
-        plt.plot(daily_data['date'], daily_data['sub_metering_2'], marker='o')
-        plt.title('Average Daily Consumption for the Laundry Room for the Current Month')
-        plt.xlabel('Date')
-        plt.ylabel('Laundry Room Consumption')
-        plt.grid(True)
-
-
-        plt.gca().set_xticks(daily_data['date'])
-        plt.gca().set_xticklabels(daily_data['date'].dt.strftime('%d'))
-
-
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png')
-        plt.close()
-        buffer.seek(0)
-
-        return FileResponse(buffer, content_type='image/png')
-
-class GenerateMonthlyPlotForSubMetering3(APIView):
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        user = request.user
-
-
-        current_date = datetime.now().date()
-        start_of_month = make_aware(datetime(current_date.year, current_date.month, 1))
-        end_of_month = make_aware(datetime.combine((datetime(current_date.year, current_date.month, 1) + pd.offsets.MonthEnd()).date(), datetime.max.time()))
-
-
-        queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_of_month, end_of_month))
-        data = pd.DataFrame.from_records(queryset.values())
-
-        if data.empty:
-            return Response({"error": "No data available for the user in the current month"},
-                            status=status.HTTP_400_BAD_REQUEST)
-
-
-        data['date'] = pd.to_datetime(data['date'])
-
-
-        data.set_index('date', inplace=True)
-        daily_data = data['sub_metering_3'].resample('D').mean().reset_index()
-        all_days = pd.date_range(start=start_of_month, end=end_of_month, freq='D')
-        daily_data = daily_data.set_index('date').reindex(all_days).reset_index()
-        daily_data.columns = ['date', 'sub_metering_3']
-
-        daily_data['sub_metering_3'].fillna(0, inplace=True)
-
-        plt.figure(figsize=(10, 6))
-        plt.plot(daily_data['date'], daily_data['sub_metering_3'], marker='o')
-        plt.title('Average Daily Consumption for the Living Room for the Current Month')
-        plt.xlabel('Date')
-        plt.ylabel('Living Room Consumption')
-        plt.grid(True)
-
-
-        plt.gca().set_xticks(daily_data['date'])
-        plt.gca().set_xticklabels(daily_data['date'].dt.strftime('%d'))
-
-
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png')
-        plt.close()
-        buffer.seek(0)
-
-        return FileResponse(buffer, content_type='image/png')
-
+class GenerateMonthlyPlotForSubMetering3(BaseGenerateMonthlyPlot):
+    metering_field = 'sub_metering_3'
+    plot_title ='Average Daily Consumption for the Living Room for the Current Month'
+    plot_ylabel = 'Living Room Consumption'
 
 class ObjectDetect(APIView):
     authentication_classes = [TokenAuthentication, SessionAuthentication]
@@ -1256,12 +870,11 @@ class ObjectDetect(APIView):
         file_path = default_storage.save(f'tmp/{uploaded_file.name}', uploaded_file)
 
         try:
-
             model = YOLOv10('smart_home/Models/YoloV10/best.pt')
             results = model(file_path, conf=0.25)
             names = {
-                0: 'bed', 1: 'chair', 2: 'couch', 3: 'dining table', 4: 'laptop', 5: 'microwave',
-                6: 'oven', 7: 'refrigerator', 8: 'sink', 9: 'toaster', 10: 'toilet', 11: 'tv'
+                0: 'Bed', 1: 'Chair', 2: 'Couch', 3: 'Dining table', 4: 'Laptop', 5: 'Microwave',
+                6: 'Oven', 7: 'Refrigerator', 8: 'Sink', 9: 'Toaster', 10: 'Toilet', 11: 'TV'
             }
             answers = []
 
