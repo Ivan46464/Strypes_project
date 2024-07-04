@@ -170,6 +170,7 @@ class PredictGlobalActivePowerWeekly(APIView):
 
 
         weekly_averages = daily_aggregated_data.mean()
+        print(weekly_averages)
         global_intensity = weekly_averages['global_intensity']
         voltage = weekly_averages['voltage']
 
@@ -676,7 +677,7 @@ class BaseGenerateDailyPlot(APIView):
 
         hourly_data = data.groupby(data['date'].dt.hour)[self.metering_field].mean().reset_index()
 
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=(10, 8))
         plt.plot(hourly_data['date'], hourly_data[self.metering_field], marker='o')
         plt.title(self.plot_title)
         plt.xlabel('Hour of Day')
@@ -743,7 +744,7 @@ class BaseGenerateWeeklyPlot(APIView):
 
         daily_data = data.groupby(data['date'].dt.date)[self.metering_field].mean().reset_index()
 
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=(10, 8))
         plt.plot(daily_data['date'], daily_data[self.metering_field], marker='o')
         plt.title(self.plot_title)
         plt.xlabel('Date')
@@ -818,7 +819,7 @@ class BaseGenerateMonthlyPlot(APIView):
         daily_data[self.metering_field].fillna(0, inplace=True)
 
 
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=(10, 8))
         plt.plot(daily_data['date'], daily_data[self.metering_field], marker='o')
         plt.title(self.plot_title)
         plt.xlabel('Date')
@@ -891,4 +892,55 @@ class ObjectDetect(APIView):
         except Exception as e:
             default_storage.delete(file_path)
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class GenerateConsumptionPlot(APIView):
+    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, time_frame):
+        user = request.user
+        current_date = datetime.now().date()
+
+        if time_frame == 'daily':
+            start_date = make_aware(datetime.combine(current_date, datetime.min.time()))
+            end_date = make_aware(datetime.combine(current_date, datetime.max.time()))
+        elif time_frame == 'weekly':
+            start_date = current_date - timedelta(days=current_date.weekday())
+            end_date = start_date + timedelta(days=6)
+            start_date = make_aware(datetime.combine(start_date, datetime.min.time()))
+            end_date = make_aware(datetime.combine(end_date, datetime.max.time()))
+        elif time_frame == 'monthly':
+            start_date = current_date.replace(day=1)
+            end_date = (start_date.replace(month=start_date.month % 12 + 1, day=1) - timedelta(days=1))
+            start_date = make_aware(datetime.combine(start_date, datetime.min.time()))
+            end_date = make_aware(datetime.combine(end_date, datetime.max.time()))
+        else:
+            return Response({"error": "Invalid time frame specified"}, status=status.HTTP_400_BAD_REQUEST)
+
+        queryset = Home_electricity_consumption.objects.filter(user=user, date__range=(start_date, end_date))
+        data = pd.DataFrame.from_records(queryset.values())
+
+        if data.empty:
+            return Response({"error": "No data available for the specified time frame"}, status=status.HTTP_400_BAD_REQUEST)
+
+        sub_metering_sums = data[['sub_metering_1', 'sub_metering_2', 'sub_metering_3']].sum()
+        labels = ['Kitchen', 'Laundry room', 'Living room']
+
+        plt.figure(figsize=(10, 8))
+        plt.bar(labels, sub_metering_sums.values, color=['blue', 'orange', 'green'])
+        plt.title(f'Total Consumption by Sub-Metering {time_frame.capitalize()}')
+        plt.xlabel('Places in home')
+        plt.ylabel('Total Consumption (kW)')
+        plt.grid(True)
+
+        for i, v in enumerate(sub_metering_sums.values):
+            plt.text(i, v + 0.02, f'{v:.2f}', ha='center', va='bottom')
+
+        buffer = io.BytesIO()
+        plt.savefig(buffer, format='png')
+        plt.close()
+        buffer.seek(0)
+
+        return FileResponse(buffer, content_type='image/png')
+
 

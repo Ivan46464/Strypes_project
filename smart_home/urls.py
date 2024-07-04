@@ -32,6 +32,7 @@ urlpatterns = [
     path('generate_plot_weekly_sub_metering_3', GenerateWeeklyPlotForSubMetering3.as_view(),name='generate_plot_weekly_sub_metering_3'),
     path('generate_plot_monthly_sub_metering_3', GenerateMonthlyPlotForSubMetering3.as_view(),name='generate_plot_monthly_sub_metering_3'),
     path('object_detect', ObjectDetect.as_view(), name='object_detect'),
+    path('plot_consumption/<str:time_frame>', GenerateConsumptionPlot.as_view(), name='generate_consumption_plot'),
 
 
     #path('plot', PlotView.as_view(), name='api-plot')
